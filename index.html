@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content, viewport-fit=cover">
+    <title>MuniBot - Chascomús</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#b8d30f">
+    
+    <!-- Iconos para todos los dispositivos -->
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+
+    <!-- iOS (Apple) específico -->
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <!-- Meta tags para PWA -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MuniBot">
+    <meta name="application-name" content="MuniBot">
+    
+    <!-- Facebook/WhatsApp share preview (opcional pero profesional) -->
+    <meta property="og:title" content="MuniBot - Asistente Municipal">
+    <meta property="og:description" content="Chatbot oficial de la Municipalidad de Chascomús">
+    <meta property="og:image" content="icon-512.png">
+    <meta property="og:type" content="website">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Encode+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="header">
+        <div class="header-left">
+            <img src="icon-192.png" id="avatar-bot" alt="Bot" onerror="this.src='https://cdn-icons-png.flaticon.com/512/4712/4712035.png'">
+            <span>MuniBot</span>
+        </div>
+        <div class="header-right">
+            <button id="voiceToggle" onclick="toggleVoz()" title="Activar/Desactivar Voz">🔇</button>
+            <button id="installBtn" class="hidden install-btn" title="Instalar App">📲 Descargar App</button>
+            <button onclick="showInfo()" title="Información">ℹ️</button>
+            <button id="closeSessionBtn" onclick="clearSession()" title="Cerrar Sesión">🔄</button>
+        </div>
+    </div>
+
+    <div id="weather-banner" class="weather-banner hidden">
+        <div class="weather-content">
+            <span id="weather-icon">⚠️</span>
+            <span id="weather-text">Alerta Meteorológica</span>
+        </div>
+        <button onclick="cerrarAlerta()" class="close-alert" title="Cerrar alerta">✖</button>
+    </div>
+
+    <div id="infoModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeInfo()">🔄</span>
+            <h3 style="color: var(--primary); margin-top: 0;">Sobre MuniBot</h3>
+            <p style="font-size: 0.95rem;">Asistente Virtual Oficial de la Municipalidad de Chascomús. Donde podés encontrar información, links y más. Para que puedas gestionar sin moverte de tu casa.</p>
+            <hr style="border-top: 1px dashed #ccc; margin: 15px 0;">
+            <div class="credits">
+                <p>© Creado por <b>Federico Perez Speroni</b></p> 
+                <p>© Logo y mascota: <b>Valentina Bezic</b></p> 
+                <p style="margin-top: 10px;"><b>Municipalidad de Chascomús 2026</b></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="vista-tarjeta" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal" onclick="cerrarTarjeta()">❌</span>
+            <h3 style="color: var(--primary); margin-top: 0;">Tarjeta Digital</h3>
+            <p style="font-size: 0.95rem;">Acá va el contenido de la tarjeta en la que te quedabas en bucle.</p>
+            <button onclick="cerrarTarjeta()" style="width: 100%; padding: 10px; margin-top: 15px; background: #ff4c4c; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                🔙 Volver al Chat
+            </button>
+        </div>
+    </div>
+
+    <div id="menu-principal" style="display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%;">
+        <div id="chatMessages" class="chat-container"></div>
+
+        <div class="input-area">
+            <button id="micButton" title="Hablar">🎙️</button>
+            <input type="text" id="userInput" placeholder="Escribí un mensaje..." autocomplete="off">
+            <button id="sendButton">➤</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

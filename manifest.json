@@ -1,0 +1,59 @@
+{
+  "name": "MuniBot - Asistente Municipal",
+  "short_name": "MuniBot",
+  "description": "Chatbot oficial de la Municipalidad de Chascomús - Trámites, consultas y atención al vecino",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "background_color": "#f4f6f8",
+  "theme_color": "#b8d30f",
+  "status_bar": "#b8d30f",
+  "categories": ["government", "productivity", "utilities"],
+  "iarc_rating_id": "0",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nueva consulta",
+      "short_name": "Consultar",
+      "description": "Iniciar nueva conversación",
+      "url": "./index.html?new=true",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        }
+      ]
+    },
+    {
+      "name": "Trámites rápidos",
+      "short_name": "Trámites",
+      "description": "Acceso directo a trámites",
+      "url": "./index.html?tramites=true",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        }
+      ]
+    }
+  ]
+}
