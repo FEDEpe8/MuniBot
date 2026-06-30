@@ -98,12 +98,15 @@ window.onclick = function(event) {
 let userName = localStorage.getItem('chas_user_name') || ""; 
 let userNeighborhood = localStorage.getItem('chas_user_neighborhood') || ""; 
 let userAge = localStorage.getItem('chas_user_age') || ""; 
-let currentPath = ['main']; 
-let isBotThinking = false; 
-let interaccionIniciada = false; 
+let currentPath = ['main'];
+let isBotThinking = false;
+let interaccionIniciada = false;
+let flujoActivo = false;      // true mientras estamos dentro de un wizard de chat.php (deuda/agua/multas/reclamos)
+let chatPhpPrimed = false;    // la 1ra llamada a chat.php siempre devuelve el saludo inicial; esto lo "precalienta"
 
 // --- ENLACES A APIs EXTERNAS ---
 const WEBHOOK_N8N = 'https://n8n.chascomus.gob.ar/webhook/MuniBot';
+const CHAT_PHP_URL = 'https://apps.chascomus.gob.ar/munibot/chat.php'; // backend con los wizards de deuda/agua/multas/reclamos 147
 
 /* --- CONFIGURACIÓN DE LA MASCOTA ANIMADA --- */
 const IMG_BOT_NORMAL = 'img-bot-normal.png';   
@@ -268,7 +271,7 @@ const MENUS = {
             { id: 'lic_tramite', label: '🪪 Licencia (Carnet)', type: 'leaf', apiKey: 'lic_turno' },
             { id: 'seg_academia', label: '🚗 Academia Conductores', type: 'leaf', apiKey: 'seg_academia' },
             { id: 'document_info', label: '🎥 Ver Video Documentación de Tránsito', type: 'leaf', apiKey: 'document_info' },
-            { id: 'seg_infracciones', label: '⚖️ Mis Infracciones', type: 'leaf', apiKey: 'seg_infracciones' },
+            { id: 'seg_infracciones', label: '⚖️ Mis Infracciones (consultar ahora)', type: 'chatphp', trigger: 'multas' },
             { id: 'poli', label: '📞 Monitoreo y Comisaría', type: 'leaf', apiKey: 'poli' }
         ]
     },
@@ -284,10 +287,10 @@ const MENUS = {
     },
     pago_deuda: {
         title: () => 'Pago de Deudas y Boletas:',
-        options: [   
-            { id: 'deuda_video', label: '🎥 Ver Video Instructivo', type: 'leaf', apiKey: 'deuda_video_info' },     
-            { id: 'deuda', label: '🔍 Ver Deuda / Pagar', type: 'leaf', apiKey: 'deuda' },
-            { id: 'agua', label: '💧 Agua', type: 'leaf', apiKey: 'agua' },
+        options: [
+            { id: 'deuda_video', label: '🎥 Ver Video Instructivo', type: 'leaf', apiKey: 'deuda_video_info' },
+            { id: 'deuda', label: '🔍 Consultar mi Deuda (en el chat)', type: 'chatphp', trigger: 'deuda' },
+            { id: 'agua', label: '💧 Consultar Consumo de Agua', type: 'chatphp', trigger: 'agua' },
             { id: 'boleta', label: '📧 Boleta Digital', type: 'leaf', apiKey: 'boleta' },
             { id: 'consulta_tributaria', label: '💸 Consulta Tributaria', type: 'leaf', apiKey: 'consulta_tributaria' }
         ]
@@ -329,10 +332,11 @@ const MENUS = {
             { id: 'empl_madrinas', label: '🤝 Empresas Madrinas', type: 'leaf', apiKey: 'res_empl_madrinas' }
         ]
     },
-    obras: { 
-        title: () => 'Atención al Vecino 147:', 
+    obras: {
+        title: () => 'Atención al Vecino 147:',
         options: [
-            { id: 'info_147', label: '📝 Iniciar Reclamo 147 (Chat), ℹ️ Info, Web y Teléfonos', type: 'leaf', apiKey: 'link_147' },
+            { id: 'reclamo_chat', label: '📝 Iniciar / Consultar Reclamo (en el chat)', type: 'chatphp', trigger: 'reclamos' },
+            { id: 'info_147', label: 'ℹ️ Info, Web y Teléfonos del 147', type: 'leaf', apiKey: 'link_147' },
             { id: 'poda', label: '🌿 Poda', type: 'leaf', apiKey: 'poda' },
             { id: 'obras_basura', label: '♻️ Recolección', type: 'leaf', apiKey: 'obras_basura' }
         ]
@@ -362,9 +366,9 @@ const RES = {
     </div>`,
     'error_busqueda': `
     <div class="info-card" style="border-left: 5px solid #ffc107;">
-        <div style="font-size: 1.1rem; margin-bottom: 8px;">🤔 <b>¡Ups! No encontré eso</b></div>
+        <div style="font-size: 1.1rem; margin-bottom: 8px;">🤔 <b>¡Ups! Eso no lo tengo</b></div>
         <p style="font-size: 0.9rem; margin-bottom: 15px; color: #333;">
-            Todavía estoy aprendiendo. ¿Probamos con otra palabra o querés ver el menú completo?
+            Todavía estoy aprendiendo y se me escapó. ¿Lo intentamos con otras palabras, o vemos el menú completo y lo buscamos juntos?
         </p>
         <button onclick="interaccionIniciada=true; resetToMain()" class="menu-btn" style="width: 100%; padding: 12px; background-color: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
             ☰ Ver Menú Completo
@@ -978,10 +982,99 @@ function validarTexto(texto) {
     for (let i = 0; i < PALABRAS_OFENSIVAS.length; i++) {
         const regexOfensiva = new RegExp(`\\b${PALABRAS_OFENSIVAS[i]}\\b`, 'i');
         if (regexOfensiva.test(t)) {
-            return { v: false, m: "Por favor, mantengamos el respeto en el chat. 😇" };
+            const respuestasModeracion = [
+                "Bajemos un cambio, dale 😇 Te leo mejor si lo escribís de otra forma.",
+                "Prefiero que sigamos con buena onda. ¿Me contás de nuevo qué necesitás?",
+                "Por favor, mantengamos el respeto en el chat. 😇"
+            ];
+            return { v: false, m: respuestasModeracion[Math.floor(Math.random() * respuestasModeracion.length)] };
         }
     }
     return { v: true, m: "" };
+}
+
+/* --- CHARLA CASUAL: RESPUESTAS HUMANAS PARA MENSAJES QUE NO SON UN TRÁMITE --- */
+function saludoSegunHora() {
+    const h = new Date().getHours();
+    if (h >= 6 && h < 13) return "¡Buen día";
+    if (h >= 13 && h < 20) return "¡Buenas tardes";
+    return "¡Buenas noches";
+}
+
+const CHARLA_CASUAL = [
+    {
+        tipo: 'saludo',
+        patrones: [/^(hola+|holis|buenas|buen dia|buenos dias|buenas tardes|buenas noches|que tal|ey|hey)\b/],
+        respuestas: (nombre) => [
+            `${saludoSegunHora()}${nombre ? ', ' + nombre : ''}! 👋 ¿En qué te puedo ayudar hoy?`,
+            `¡Hola${nombre ? ' ' + nombre : ''}! Acá ando, listo para ayudarte. ¿Qué necesitás?`,
+            `${saludoSegunHora()}${nombre ? ', ' + nombre : ''}! Decime qué buscás y vemos cómo te doy una mano.`
+        ]
+    },
+    {
+        tipo: 'como_estas',
+        patrones: [/como estas/, /como andas/, /como te va/, /todo bien\??$/],
+        respuestas: (nombre) => [
+            `¡Todo bien por acá, gracias por preguntar! 😊 ¿Y vos${nombre ? ', ' + nombre : ''}? Contame en qué te ayudo.`,
+            `De diez, ¡dale para adelante! ¿En qué te puedo dar una mano hoy?`
+        ]
+    },
+    {
+        tipo: 'agradecimiento',
+        patrones: [/\bgracias\b/, /\bse agradece\b/, /\bmuy amable\b/],
+        respuestas: (nombre) => [
+            `¡De nada${nombre ? ', ' + nombre : ''}! Para eso estoy. 🙌`,
+            `¡Un placer ayudarte! Si necesitás otra cosa, acá estoy.`,
+            `¡Dale, no hay drama! Cualquier otra consulta, escribime nomás.`
+        ]
+    },
+    {
+        tipo: 'despedida',
+        patrones: [/^(chau|adios|nos vemos|hasta luego|bye|me voy)\b/],
+        respuestas: (nombre) => [
+            `¡Chau${nombre ? ', ' + nombre : ''}! Que tengas un gran día. Volvé cuando quieras 👋`,
+            `¡Nos vemos! Acá voy a estar si me necesitás de nuevo.`
+        ]
+    },
+    {
+        tipo: 'cumplido',
+        patrones: [/sos groso/, /sos util/, /me ayudaste/, /buenisimo/, /excelente bot/, /sos un capo/, /sos genial/, /muy bueno el bot/],
+        respuestas: (nombre) => [
+            `¡Qué lindo lo que decís! 🥹 Hago lo que puedo para ayudarte mejor.`,
+            `¡Gracias! Eso me pone muy contento. Seguimos ayudando en lo que necesites.`
+        ]
+    },
+    {
+        tipo: 'frustracion',
+        patrones: [/no entendes/, /no entendiste/, /no sirve/, /no funciona/, /esto es un desastre/, /que bodrio/, /no me ayuda/, /no me sirvio/],
+        respuestas: (nombre) => [
+            `Perdón si no di en la tecla todavía${nombre ? ', ' + nombre : ''}. Contame con otras palabras qué necesitás, o tocá "Ver Menú Completo" y lo buscamos juntos.`,
+            `Entiendo, a veces no doy con la respuesta justa. Probemos de nuevo: ¿qué trámite o información estás buscando?`
+        ]
+    },
+    {
+        tipo: 'chiste',
+        patrones: [/contame un chiste/, /hace reir/, /decime un chiste/, /sabes algun chiste/],
+        respuestas: () => [
+            `¿Por qué la laguna de Chascomús nunca se aburre? ¡Porque siempre tiene buena onda fluyendo! 🌊😄 ¿Seguimos con algún trámite?`,
+            `Che, de comediante tengo poco, pero te tiro una: ¿sabés cuál es el trámite más rápido de la Muni? El que ya hiciste 😅. ¿En qué te ayudo?`
+        ]
+    }
+];
+
+function detectarCharlaCasual(texto) {
+    const t = normalizar(texto);
+    // Si el mensaje es largo, probablemente sea una consulta real (no charla casual) -> lo dejamos pasar a la IA/buscador.
+    if (t.split(' ').filter(Boolean).length > 6) return null;
+    for (const grupo of CHARLA_CASUAL) {
+        for (const patron of grupo.patrones) {
+            if (patron.test(t)) {
+                const opciones = grupo.respuestas(userName);
+                return opciones[Math.floor(Math.random() * opciones.length)];
+            }
+        }
+    }
+    return null;
 }
 
 function showTyping() {
@@ -1063,18 +1156,21 @@ function handleAction(opt) {
     addMessage(opt.label, 'user');
     
     if(opt.apiKey) {
-        showTyping(); 
-        setTimeout(() => { addMessage(RES[opt.apiKey]); showNavControls(); }, 800); 
-        registrarEnPlanilla(opt.label); 
-    } else if(opt.link) { 
         showTyping();
-        setTimeout(() => { 
-            addMessage(`Te dejo el acceso directo acá: <br><br><a href="${opt.link}" target="_blank" ${linkEstiloGlobal}>${opt.label}</a>`, 'bot'); 
-            showNavControls(); 
-            registrarEnPlanilla(opt.label); 
+        setTimeout(() => { addMessage(RES[opt.apiKey]); showNavControls(); }, 800);
+        registrarEnPlanilla(opt.label);
+    } else if(opt.type === 'chatphp') {
+        registrarEnPlanilla(opt.label);
+        iniciarFlujoChatPHP(opt);
+    } else if(opt.link) {
+        showTyping();
+        setTimeout(() => {
+            addMessage(`Te dejo el acceso directo acá: <br><br><a href="${opt.link}" target="_blank" ${linkEstiloGlobal}>${opt.label}</a>`, 'bot');
+            showNavControls();
+            registrarEnPlanilla(opt.label);
         }, 800);
     } else if(MENUS[opt.id]) {
-        currentPath.push(opt.id); showMenu(opt.id); 
+        currentPath.push(opt.id); showMenu(opt.id);
     }
 }
 
@@ -1107,7 +1203,7 @@ function showMenu(key) {
 function resetToMain() { currentPath = ['main']; showMenu('main'); } 
 
 /* --- 4. BUSCADOR INTELIGENTE IA (N8N) + BACKUP LOCAL --- */
-const FRASES = ["¡Bip bop! 🤖 Encontré esto:", "¡Acá tengo la info! ✨", "¡Búsqueda exitosa! 🐾", "¡Ya sé lo que buscás! 💡", "¡Eso era lo que buscabas! 🎯"];
+const FRASES = ["¡Bip bop! 🤖 Encontré esto:", "¡Acá tengo la info! ✨", "¡Búsqueda exitosa! 🐾", "¡Ya sé lo que buscás! 💡", "¡Eso era lo que buscabas! 🎯", "¡Mirá lo que encontré para vos! 🔎", "¡Listo, acá te dejo esto! 👇"];
 
 function buscarOpcionProfunda(texto) {
     let t = normalizar(texto);
@@ -1175,6 +1271,8 @@ function fallbackBusqueda(texto) {
             if (opcionEncontrada.apiKey) {
                 showTyping();
                 setTimeout(() => { addMessage(RES[opcionEncontrada.apiKey]); showNavControls(); }, 600);
+            } else if (opcionEncontrada.type === 'chatphp') {
+                iniciarFlujoChatPHP(opcionEncontrada);
             } else if (opcionEncontrada.link) {
                 showTyping();
                 setTimeout(() => {
@@ -1190,6 +1288,187 @@ function fallbackBusqueda(texto) {
         setChasBotState();
         addMessage(RES['error_busqueda'], "bot");
     }
+}
+
+/* ==========================================================================
+   ACCIONES EN VIVO (chat.php): Deuda RAFAM, Consumo de Agua, Infracciones
+   y Reclamos 147. A diferencia del resto del bot (botones/IA con respuestas
+   fijas), estas 4 acciones ejecutan wizards de varios pasos contra el
+   backend chat.php, que mantiene su propio estado de conversación por
+   sesión (cookie PHP). Mientras `flujoActivo` es true, TODO lo que el
+   vecino escribe se manda directo a chat.php (ver processInput).
+   ========================================================================== */
+
+// Palabras clave para arrancar un wizard directo desde texto libre
+// (mismo criterio que usa chat.php internamente, así no se pisan).
+const PATRONES_CHATPHP = {
+    deuda:    /\b(deudas?|adeudo|adeuda|impuestos?|cuanto debo|pagar tasa|mis tasas)\b/,
+    agua:     /\b(consumo de agua|agua corriente|sanitarios?)\b/,
+    multas:   /\b(infraccion(es)?|multas?|actas?)\b/,
+    reclamos: /\b(reclamos?|147|alumbrado|luminaria|liminaria|bache|vereda rota|seguimiento de reclamo)\b/
+};
+
+function detectarAccionChatPHP(texto) {
+    const t = normalizar(texto);
+    for (const trigger in PATRONES_CHATPHP) {
+        if (PATRONES_CHATPHP[trigger].test(t)) return trigger;
+    }
+    return null;
+}
+
+// Dispara un wizard desde un botón del menú (opt.trigger: 'deuda'|'agua'|'multas'|'reclamos')
+function iniciarFlujoChatPHP(opt) {
+    flujoActivo = true;
+    enviarAChatPHP(opt.trigger);
+}
+
+async function enviarAChatPHP(texto, forzarSalida = false) {
+    showTyping();
+    try {
+        // La 1ra llamada a chat.php en una sesión nueva siempre devuelve el saludo
+        // inicial (ignora el mensaje). La "precalentamos" para que el mensaje real
+        // (deuda/agua/multas/reclamos) se procese en la 2da llamada.
+        if (!chatPhpPrimed) {
+            await fetch(CHAT_PHP_URL, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: 'hola' })
+            });
+            chatPhpPrimed = true;
+        }
+
+        const response = await fetch(CHAT_PHP_URL, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: texto })
+        });
+        const data = await response.json();
+        const replyTexto = data.reply || '';
+
+        if (forzarSalida) {
+            flujoActivo = false;
+            addMessage('Listo, volvemos al menú principal 🙂', 'bot');
+            resetToMain();
+            return;
+        }
+
+        addMessage(mdBasicoAHtml(replyTexto || 'No pude procesar la respuesta. Probá de nuevo, o tocá Cancelar.'), 'bot');
+
+        if (data.charts && data.charts.length > 0) {
+            addMessage(renderizarChartsAgua(data.charts), 'bot');
+        }
+
+        // La respuesta cierra el wizard cuando termina con la frase de cierre habitual
+        const cierraFlujo = /puedo ayudarte con algo mas/.test(normalizar(replyTexto));
+
+        if (cierraFlujo) {
+            flujoActivo = false;
+            showNavControls();
+        } else {
+            if (data.opciones && data.opciones.length > 0) {
+                mostrarOpcionesChatPHP(data.opciones);
+            }
+            mostrarControlesChatPHP();
+        }
+
+        registrarEnPlanilla(`[chat.php] ${texto}`);
+    } catch (error) {
+        console.error('❌ Error de red con chat.php:', error);
+        flujoActivo = false;
+        addMessage('😕 No pude conectarme con el sistema en este momento. Probá de nuevo en unos minutos, o tocá el botón para volver al menú.', 'bot');
+        showNavControls();
+    }
+}
+
+function mostrarOpcionesChatPHP(opciones) {
+    const container = document.getElementById('chatMessages');
+    const optDiv = document.createElement('div');
+    optDiv.className = 'options-container';
+    opciones.forEach(o => {
+        const btn = document.createElement('button');
+        btn.className = 'option-button';
+        btn.innerText = o.label;
+        btn.onclick = () => {
+            addMessage(o.label, 'user');
+            enviarAChatPHP(o.value);
+        };
+        optDiv.appendChild(btn);
+    });
+    container.appendChild(optDiv);
+    container.scrollTop = container.scrollHeight;
+}
+
+function mostrarControlesChatPHP() {
+    const container = document.getElementById('chatMessages');
+    const navDiv = document.createElement('div');
+    navDiv.className = 'options-container';
+    navDiv.innerHTML = `<button class="option-button back" onclick="cancelarFlujoChatPHP()">❌ Cancelar / Menú</button>`;
+    container.appendChild(navDiv);
+    container.scrollTop = container.scrollHeight;
+}
+
+function cancelarFlujoChatPHP() {
+    interaccionIniciada = true;
+    addMessage('❌ Cancelar / Menú', 'user');
+    enviarAChatPHP('menu', true);
+}
+
+// Convierte el markdown liviano que devuelve chat.php (**negrita**, `code`,
+// [texto](url), URLs sueltas y saltos de línea) a HTML seguro para el chat.
+function mdBasicoAHtml(md) {
+    if (!md) return '';
+    let html = md
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    // Links markdown: [texto](url)
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        (_, texto, url) => `<a href="${url}" target="_blank" ${linkEstiloGlobal}>${texto}</a>`);
+
+    // Negrita: **texto**
+    html = html.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+
+    // Código: `texto`
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // URLs sueltas que no quedaron ya dentro de un href="..."
+    html = html.replace(/(?<!href=")(https?:\/\/[^\s<")]+)/g,
+        (url) => `<a href="${url}" target="_blank" ${linkEstiloGlobal}>${url}</a>`);
+
+    // Saltos de línea
+    html = html.replace(/\r\n/g, '\n').replace(/\n/g, '<br>');
+
+    return `<div class="info-card">${html}</div>`;
+}
+
+// Mini-gráfico de barras (CSS puro, sin librerías) para el consumo de agua por período.
+function renderizarChartsAgua(charts) {
+    if (!charts || charts.length === 0) return '';
+    let html = '<div class="info-card">';
+    charts.forEach(c => {
+        const valores = (c.data || []).map(d => Number(d.consumo) || 0);
+        const max = Math.max(1, ...valores);
+        html += `<div style="margin-bottom:14px;"><b>📟 Medidor ${c.medidor}</b>`;
+        if (c.porcent) html += ` <small>(${c.porcent}%)</small>`;
+        html += `<div style="margin-top:6px;">`;
+        (c.data || []).forEach(d => {
+            const val = Number(d.consumo) || 0;
+            const pct = Math.round((val / max) * 100);
+            html += `
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:0.8rem;">
+                    <span style="width:70px; flex-shrink:0;">${d.periodo || d.anio || ''}</span>
+                    <div style="flex:1; background:#eee; border-radius:4px; overflow:hidden;">
+                        <div style="width:${pct}%; background:#25d366; color:white; padding:2px 6px; font-size:0.75rem; white-space:nowrap;">${val} m³</div>
+                    </div>
+                </div>`;
+        });
+        html += `</div></div>`;
+    });
+    html += '</div>';
+    return html;
 }
 
 /* --- 5. REGISTRO (FLUJO LINEAL ESTRICTO) --- */
@@ -1255,12 +1534,21 @@ function processInput() {
     addMessage(val, 'user');
     input.value = "";
 
+    // 0. Wizard activo con chat.php (deuda/agua/multas/reclamos147 en curso):
+    //    todo lo que se escriba va directo a chat.php hasta que el flujo cierre.
+    if (flujoActivo) {
+        const normalizado = normalizar(val);
+        const esSalida = ['menu', 'salir', 'cancelar', 'volver', 'inicio', 'home'].includes(normalizado);
+        enviarAChatPHP(val, esSalida);
+        return;
+    }
+
     // 1. Onboarding
     if (!userName) {
         userName = val;
         localStorage.setItem('chas_user_name', userName);
         showTyping();
-        setTimeout(() => addMessage(`¡Gusto conocerte <b>${userName}</b>! 👋 ¿De qué barrio sos?`, 'bot'), 800);
+        setTimeout(() => addMessage(`¡Un gusto, <b>${userName}</b>! 😊 Contame, ¿de qué barrio sos?`, 'bot'), 800);
         return; 
     }
     if (!userNeighborhood) {
@@ -1272,7 +1560,7 @@ function processInput() {
         } else if(similares.length > 0 && normalizar(val).length > 2) {
             addMessage("No lo encontré exacto. ¿Es alguno de estos?, tocá el botón correspondiente:", "bot", similares.map(s => ({label: s, type: 'barrio_select'})));
         } else {
-            addMessage(`⚠️ No reconozco ese barrio. Por favor, escribilo de nuevo.`, 'bot'); 
+            addMessage(`Mmm, ese barrio no lo tengo identificado 🤔 ¿Me lo escribís de nuevo? (por ejemplo "Centro" o "San Cayetano")`, 'bot');
         }
         return; 
     }
@@ -1281,9 +1569,25 @@ function processInput() {
         return; 
     }
 
-    // 2. IA
-    registrarEnPlanilla(val); 
-    ejecutarBusquedaInteligente(val); 
+    // 2. Charla casual (respuesta humana e instantánea, sin esperar a la IA)
+    const respuestaCasual = detectarCharlaCasual(val);
+    if (respuestaCasual) {
+        showTyping();
+        setTimeout(() => { addMessage(respuestaCasual, 'bot'); showNavControls(); }, 600);
+        return;
+    }
+
+    // 3. Acciones en vivo (chat.php): deuda, agua, infracciones, reclamos 147
+    const accionDetectada = detectarAccionChatPHP(val);
+    if (accionDetectada) {
+        flujoActivo = true;
+        enviarAChatPHP(val);
+        return;
+    }
+
+    // 4. IA
+    registrarEnPlanilla(val);
+    ejecutarBusquedaInteligente(val);
 }
 
 /* --- GESTOR DE AGENDA DINÁMICA (GOOGLE SHEETS) --- */
@@ -1372,14 +1676,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         showTyping();
         setTimeout(() => {
             setChasBotState();
-            addMessage("👋 ¡Hola! Soy el asistente virtual de la Municipalidad de Chascomús. ¿Cómo te llamás?", "bot");
-        }, 500); 
+            addMessage(`${saludoSegunHora()}! 👋 Soy MuniBot, el asistente virtual de la Municipalidad de Chascomús. ¿Cómo te llamás?`, "bot");
+        }, 500);
     } else {
         setChasBotState();
         showTyping();
         setTimeout(() => {
             setChasBotState();
-            addMessage(`¡Hola de nuevo, <b>${userName}</b>! 👋 ¿En qué puedo ayudarte hoy?`, 'bot');
+            addMessage(`${saludoSegunHora()}, <b>${userName}</b>! 👋 Qué bueno verte de nuevo. ¿En qué te ayudo hoy?`, 'bot');
             setTimeout(() => {
                 resetToMain();
                 setChasBotState();
