@@ -142,7 +142,7 @@ let isBotThinking = false;
 /* 🆕 ESTADO PARA PREGUNTAS GUIADAS (HABILITACIONES Y TIQUETERA) */
 let pendingQuestion = null; // { type, step, collectedData, originalQuery }
 
-const WEBHOOK_N8N = '/api/chat.php';
+const WEBHOOK_N8N = 'https://n8n.chascomus.gob.ar/webhook-test/MuniBot';
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx4OwdnxlW5ux5CDKvrsoFjy9yDiTT1o1KQ0QOtghtBFjPX1dTTcpL20hV2dsPjJU0p/exec';
 const IMG_BOT_NORMAL = 'icon-192.png';
 
