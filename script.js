@@ -1088,7 +1088,7 @@ const URGENCIAS = [
             /me agrede/, /me agreden/, /agresion sexual/, /me amenaza/, /me quiere matar/,
             /tengo miedo de mi (pareja|marido|esposo|novio)/
         ],
-        apiKey: 'politicas_gen',
+        apiKeys: ['politicas_gen'],
         intro: (nombre) => `💜 ${nombre ? nombre + ', ' : ''}quiero que sepas que no estás sola/o. Te paso ya mismo el contacto de ayuda:`
     },
     {
@@ -1097,8 +1097,8 @@ const URGENCIAS = [
             /me robaron/, /me asaltaron/, /me quisieron robar/, /\bme atacaron\b/,
             /sufri un robo/, /soy victima de un delito/, /fui victima de/
         ],
-        apiKey: 'pamuv',
-        intro: (nombre) => `🆘 ${nombre ? nombre + ', ' : ''}lamento que te haya pasado. Te dejo el contacto de asistencia a la víctima:`
+        apiKeys: ['ojos_en_alerta', 'pamuv'],
+        intro: (nombre) => `🆘 ${nombre ? nombre + ', ' : ''}lamento que te haya pasado. Te dejo dos contactos: uno para reportarlo ahora mismo y otro para que te acompañen:`
     }
 ];
 
@@ -1272,27 +1272,115 @@ async function ejecutarBusquedaInteligente(texto) {
         const response = await fetch(WEBHOOK_N8N, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                tipo_accion: "chat", 
-                mensaje: texto, 
-                usuario: userName 
+            body: JSON.stringify({
+                tipo_accion: "chat",
+                mensaje: texto,
+                usuario: userName,
+                barrio: userNeighborhood,
+                edad: userAge
             })
         });
         const data = await response.json();
-        
+        renderRespuestaIA(data, texto);
+    } catch (error) {
+        console.warn("⚠️ N8N no respondió, usando buscador local:", error);
+        fallbackBusqueda(texto); // Respaldo local
+    }
+}
+
+// Interpreta y dibuja lo que devuelve el webhook de n8n.
+// Formato real del prompt: { output: "texto", cards: [{title, body, buttons:[{label,link,type}]}], options: [{id,label,link?}] }
+// Se mantiene compatibilidad con un formato viejo más simple ({accion, texto/id}) por las dudas.
+function renderRespuestaIA(data, textoOriginal) {
+    if (!data || typeof data !== 'object') {
+        fallbackBusqueda(textoOriginal);
+        return;
+    }
+
+    // --- Formato viejo (compatibilidad) ---
+    if (data.accion) {
         if (data.accion === 'texto') {
             addMessage(data.texto, "bot", [{ id: 'main', label: '🏠 Ver Menú' }]);
         } else if (data.accion === 'tarjeta' && RES[data.id]) {
             addMessage(RES[data.id], "bot", [{ id: 'main', label: '🏠 Inicio' }]);
         } else if (data.accion === 'menu') {
-            handleAction({ id: data.id, label: 'Buscando...' }); 
+            handleAction({ id: data.id, label: 'Buscando...' });
         } else {
-            fallbackBusqueda(texto); // Respaldo local
+            fallbackBusqueda(textoOriginal);
         }
-    } catch (error) {
-        console.warn("⚠️ N8N no respondió, usando buscador local:", error);
-        fallbackBusqueda(texto); // Respaldo local
+        return;
     }
+
+    // --- Formato actual: { output, cards, options } ---
+    const hayOutput = typeof data.output === 'string' && data.output.trim() !== '';
+    const hayCards  = Array.isArray(data.cards) && data.cards.length > 0;
+
+    if (!hayOutput && !hayCards) {
+        fallbackBusqueda(textoOriginal);
+        return;
+    }
+
+    if (hayOutput) {
+        addMessage(data.output.replace(/\n/g, '<br>'), 'bot');
+    }
+
+    if (hayCards) {
+        data.cards.forEach(card => addMessage(renderizarTarjetaIA(card), 'bot'));
+    }
+
+    if (Array.isArray(data.options) && data.options.length > 0) {
+        mostrarOpcionesIA(data.options);
+    } else {
+        showNavControls();
+    }
+
+    registrarEnPlanilla(textoOriginal);
+}
+
+// Arma el HTML de una tarjeta { title, body, buttons:[{label,link,type}] } con el mismo
+// estilo visual (.info-card / botones verdes) que el resto de las tarjetas estáticas del bot.
+function renderizarTarjetaIA(card) {
+    if (!card) return '';
+    const titulo  = card.title ? `<strong>${card.title}</strong><br><br>` : '';
+    const cuerpo  = card.body ? `${card.body.replace(/\n/g, '<br>')}<br><br>` : '';
+    const botones = (Array.isArray(card.buttons) ? card.buttons : [])
+        .filter(b => b && b.label && b.link)
+        .map(b => `<a href="${b.link}" target="_blank" ${linkEstiloGlobal} style="display:inline-block; margin:3px 6px 3px 0;">${b.label}</a>`)
+        .join('');
+    return `<div class="info-card">${titulo}${cuerpo}${botones}</div>`;
+}
+
+// Botones de "options" que devuelve la IA: con link abren/derivan al instante,
+// sin link mandan el label como una nueva consulta a la IA, y "main" vuelve al menú local.
+function mostrarOpcionesIA(opciones) {
+    const container = document.getElementById('chatMessages');
+    const optDiv = document.createElement('div');
+    optDiv.className = 'options-container';
+    opciones.forEach(o => {
+        if (!o || !o.label) return;
+        const btn = document.createElement('button');
+        btn.className = `option-button ${o.id === 'main' ? 'back' : ''}`;
+        btn.innerText = o.label;
+        btn.onclick = () => {
+            interaccionIniciada = true;
+            addMessage(o.label, 'user');
+            if (o.id === 'main') {
+                resetToMain();
+                return;
+            }
+            if (o.link) {
+                addMessage(`Te dejo el acceso directo acá: <br><br><a href="${o.link}" target="_blank" ${linkEstiloGlobal}>${o.label}</a>`, 'bot');
+                showNavControls();
+                registrarEnPlanilla(o.label);
+                return;
+            }
+            registrarEnPlanilla(o.label);
+            ejecutarBusquedaInteligente(o.label);
+        };
+        optDiv.appendChild(btn);
+    });
+    container.appendChild(optDiv);
+    container.scrollTop = container.scrollHeight;
 }
 
 function fallbackBusqueda(texto) {
@@ -1415,7 +1503,7 @@ function processInput() {
         showTyping();
         setTimeout(() => {
             addMessage(urgencia.intro(userName), 'bot');
-            addMessage(RES[urgencia.apiKey]);
+            urgencia.apiKeys.forEach(k => addMessage(RES[k]));
             showNavControls();
         }, 500);
         registrarEnPlanilla(`[URGENCIA] ${val}`);
