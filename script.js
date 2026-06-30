@@ -1073,6 +1073,45 @@ function detectarCharlaCasual(texto) {
     return null;
 }
 
+/* --- URGENCIAS: DETECCIÓN INSTANTÁNEA Y LOCAL (no espera a la IA/n8n) ---
+   Si alguien escribe algo que suena a un pedido de ayuda urgente (violencia
+   de género, ser víctima de un delito/agresión), mostramos la tarjeta de
+   contacto inmediato directo, sin depender de que el webhook de n8n esté
+   arriba o entienda el mensaje. Mejor pecar de sensible que de no responder. */
+const URGENCIAS = [
+    {
+        tipo: 'violencia_genero',
+        patrones: [
+            /violencia de genero/, /violencia familiar/, /violencia domestica/, /\bviolencia\b/,
+            /me pega/, /me pegan/, /me esta(n)? pegando/, /me golpea/, /me golpean/,
+            /\bmaltrato\b/, /me maltratan/, /me abusan/, /abuso sexual/,
+            /me agrede/, /me agreden/, /agresion sexual/, /me amenaza/, /me quiere matar/,
+            /tengo miedo de mi (pareja|marido|esposo|novio)/
+        ],
+        apiKey: 'politicas_gen',
+        intro: (nombre) => `💜 ${nombre ? nombre + ', ' : ''}quiero que sepas que no estás sola/o. Te paso ya mismo el contacto de ayuda:`
+    },
+    {
+        tipo: 'victima_delito',
+        patrones: [
+            /me robaron/, /me asaltaron/, /me quisieron robar/, /\bme atacaron\b/,
+            /sufri un robo/, /soy victima de un delito/, /fui victima de/
+        ],
+        apiKey: 'pamuv',
+        intro: (nombre) => `🆘 ${nombre ? nombre + ', ' : ''}lamento que te haya pasado. Te dejo el contacto de asistencia a la víctima:`
+    }
+];
+
+function detectarUrgencia(texto) {
+    const t = normalizar(texto);
+    for (const grupo of URGENCIAS) {
+        for (const patron of grupo.patrones) {
+            if (patron.test(t)) return grupo;
+        }
+    }
+    return null;
+}
+
 function showTyping() {
     isBotThinking = true;
 
@@ -1367,10 +1406,23 @@ function processInput() {
     }
     if (!userAge) {
         procesarEdadTexto(val);
-        return; 
+        return;
     }
 
-    // 2. Charla casual (respuesta humana e instantánea, sin esperar a la IA)
+    // 2. Urgencias (violencia de género, víctima de delito): tarjeta de ayuda YA, sin esperar a la IA
+    const urgencia = detectarUrgencia(val);
+    if (urgencia) {
+        showTyping();
+        setTimeout(() => {
+            addMessage(urgencia.intro(userName), 'bot');
+            addMessage(RES[urgencia.apiKey]);
+            showNavControls();
+        }, 500);
+        registrarEnPlanilla(`[URGENCIA] ${val}`);
+        return;
+    }
+
+    // 3. Charla casual (respuesta humana e instantánea, sin esperar a la IA)
     const respuestaCasual = detectarCharlaCasual(val);
     if (respuestaCasual) {
         showTyping();
@@ -1378,7 +1430,7 @@ function processInput() {
         return;
     }
 
-    // 3. IA
+    // 4. IA
     registrarEnPlanilla(val);
     ejecutarBusquedaInteligente(val);
 }
